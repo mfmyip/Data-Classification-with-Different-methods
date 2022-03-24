@@ -1,0 +1,7 @@
+------------------------------------------------------------------------------------------
+Attempt 1                                               
+------------------------------------------------------------------------------------------
+Data cleanup: removed predictors with >20% missing; NAs replaced with either mode (for factors), mean (for numeric)
+Language: R
+Method: Random Forests
+cross-entropy: 1.2506
