@@ -12,12 +12,13 @@ library(randomForest)
 library(MASS)
 library(caret)
 
-train <- read.csv("../data/train.csv")
-predict_set <- read.csv("../data/test.csv")
+setwd("E:/Google Drive/School/W2022/STAT 441/kaggle/stat441_w22_kaggle_project/murphy/randomforest")
+
+train <- read.csv("../../data/train.csv")
+predict_set <- read.csv("../../data/test.csv")
 predict_set$health <- rep(NA, NROW(predict_set))
 
 fullset <- rbind(train, predict_set)
-
 
 Mode <- function(x, na.rm = T) {
   if(na.rm){
@@ -51,7 +52,7 @@ sum(missing_pct >= 0.2)
 # remove cols with more than 80% NA (20% cutoff)
 fullset <- fullset[, missing_pct <= 0.2]
 
-factors <- as.vector(read.table("factor.txt", header=F))
+factors <- as.vector(read.table("../factor.txt", header=F))
 factors <- factors[[1]]
 
 selected_factors <- factors[factors %in% colnames(fullset)]
@@ -89,6 +90,27 @@ print(model)
 summary(model)
 ```
 
+```{r var_analysis}
+library(ggplot2)
+
+# find important variables
+imp <- importance(model)
+imp_df <- data.frame(
+  vars = rownames(imp),
+  coef = imp
+)
+imp_df <- imp_df[rev(order(imp_df$MeanDecreaseGini)),]
+
+#write.csv(imp_df, "importance.csv", row.names = F)
+
+p<-ggplot(data=imp_df[1:50,], aes(x=reorder(var, MeanDecreaseGini), y=MeanDecreaseGini)) +
+  geom_bar(stat="identity") +
+  xlab("Predictor") +
+  ylab("Importance (MeanDecreaseGini)") +
+  coord_flip()
+  
+p
+```
 
 ```{r predict}
 p1 <- predict(model, datatest, type = "prob")
@@ -110,3 +132,34 @@ out.df <- cbind(predict_set$uniqueid, out.df)
 colnames(out.df) <- c("uniqueid", "p1", "p2", "p3", "p4", "p5")
 write.csv(out.df, "prediction.csv", row.names = F)
 ```
+
+# attempt 2
+
+Variable selection based on top 50% most important variables
+
+```{r attempt2_setup}
+pos <- with(imp_df, which.min(abs(imp_df$MeanDecreaseGini - median(imp_df$MeanDecreaseGini))))
+selected <- c(imp_df[1:(pos-1),]$var, 'health')
+
+train <- train[, selected]
+predict_set <- predict_set[, selected[-length(selected)]]
+
+#Random sampling 
+samplesize = 0.70*nrow(train)
+set.seed(100)
+index = sample(seq_len(nrow(train)), size = samplesize)
+#Creating training and test set 
+datatrain = train[index,]
+datatest = train[-index,]
+
+model <- randomForest(health ~ . , data = datatrain, proximity = T)
+
+p1 <- predict(model, datatest, type = "prob")
+cross_entropy(p1, datatest$health)
+```
+
+
+
+
+
+
