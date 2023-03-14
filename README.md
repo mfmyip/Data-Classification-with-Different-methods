@@ -2,11 +2,11 @@
 
 This is a project that uses the following machine learning models to classify the health status of an individual based on the given data [here](data/train.csv)
 
-- Simple Neural Networks
-- k Nearest Neighbours
-- Naive Bayesian
-- XGBoost
-- Random Forest
+- [Simple Neural Networks](murphy/neural/neural.ipynb)
+- [k Nearest Neighbours](murphy/kNN/kNearestNeighbours.ipynb)
+- [Naive Bayesian](murphy/NaiveBayes/nb.ipynb)
+- [XGBoost](murphy/XGboost/xgboost.ipynb)
+- [Random Forest](murphy/randomforest/randomforest.ipynb)
 
 ## Preprocessing
 
