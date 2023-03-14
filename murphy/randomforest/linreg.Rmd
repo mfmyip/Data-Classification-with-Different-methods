@@ -14,20 +14,11 @@ library(caret)
 
 setwd("E:/Google Drive/School/W2022/STAT 441/kaggle/stat441_w22_kaggle_project/murphy/randomforest")
 
-train <- read.csv("../../data/train.csv")
-predict_set <- read.csv("../../data/test.csv")
-predict_set$health <- rep(NA, NROW(predict_set))
+X_train <- read.csv("TRAIN.csv")
+X_test <- read.csv("TRAIN_VALID.csv")
+TEST <- read.csv("TEST.csv")
 
-fullset <- rbind(train, predict_set)
-
-Mode <- function(x, na.rm = T) {
-  if(na.rm){
-    x = x[!is.na(x)]
-  }
-
-  ux <- unique(x)
-  return(ux[which.max(tabulate(match(x, ux)))])
-}
+y_test <- X_test['health']
 
 cross_entropy <- function (predict, obs_class) {
   # predict is a matrix, obs_class vector of class {1..M}
@@ -40,52 +31,26 @@ cross_entropy <- function (predict, obs_class) {
 }
 ```
 
-find rows columns with > 50% NA
+```{r rm_corr}
+tab <- read.csv("../../data/variables.csv")
+tab <- tab[,c("var_code", "isTabulated")]
+tab <- tab[as.logical(tab$isTabulated), 'var_code']
+tab <- intersect(colnames(X_train), tab)
 
-```{r cleanup}
-# % NA per column
-missing_pct <- apply(train, 2, function(col) {sum(is.na(col))/NROW(col)})
-
-# 1081 cols with more than 20% NA
-sum(missing_pct >= 0.2)
-
-# remove cols with more than 80% NA (20% cutoff)
-fullset <- fullset[, missing_pct <= 0.2]
-
-factors <- as.vector(read.table("../factor.txt", header=F))
-factors <- factors[[1]]
-
-selected_factors <- factors[factors %in% colnames(fullset)]
-
-# as.factor factors 
-fullset[selected_factors] <- lapply(fullset[selected_factors] , as.factor)
-
-# replacing NAs with mode for factors, mean for numeric
-M <- NCOL(fullset)
-train <- data.frame(lapply(fullset[1:NROW(train),], function(x) {
-    if(is.factor(x)) replace(x, is.na(x), Mode(na.omit(x)))
-    else if(is.numeric(x)) replace(x, is.na(x), mean(x, na.rm=TRUE))
-    else x
-}))
-predict_set <- data.frame(lapply(fullset[(NROW(train)+1):NROW(fullset), 1:(M-1)], function(x) {
-    if(is.factor(x)) replace(x, is.na(x), Mode(na.omit(x)))
-    else if(is.numeric(x)) replace(x, is.na(x), mean(x, na.rm=TRUE))
-    else x
-}))
+X_train[tab] <- lapply(X_train[tab], as.factor)
+X_test[tab] <- lapply(X_test[tab], as.factor)
+TEST[tab] <- lapply(X_test[tab], as.factor)
 ```
 
 ```{r model_fit, cache = T}
-#Dividing data into training and test set
-#Random sampling 
-samplesize = 0.60*nrow(train)
-set.seed(100)
-index = sample(seq_len(nrow(train)), size = samplesize)
-#Creating training and test set 
-datatrain = train[index,]
-datatest = train[-index,]
-
 #Build ordinal logistic regression model
-model <- randomForest(health ~ . - uniqueid - year - personid, data = datatrain, proximity = T)
+model <- randomForest(
+  as.factor(health) ~ . - year, 
+  data = X_train,
+  ntree = 900,
+  mtry = 5,
+  maxnodes = 70
+  )
 print(model)
 summary(model)
 ```
@@ -113,8 +78,8 @@ p
 ```
 
 ```{r predict}
-p1 <- predict(model, datatest, type = "prob")
-#p2 <- predict(model, predict_set, type="prob")
+p2 <- predict(model, X_test, type="prob")
+cross_entropy(p2, y_test[[1]])
 
 # transform predict test set
 #var_subset <- colnames(train)[-NROW(colnames(train))]
@@ -126,7 +91,7 @@ p1 <- predict(model, datatest, type = "prob")
 #    else x
 #}))
 
-prediction <- predict(model, predict_set,type = "prob")
+prediction <- predict(model, predict_set, type = "prob")
 out.df <- as.data.frame(prediction)
 out.df <- cbind(predict_set$uniqueid, out.df)
 colnames(out.df) <- c("uniqueid", "p1", "p2", "p3", "p4", "p5")

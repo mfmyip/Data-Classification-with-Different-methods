@@ -1,0 +1,193 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r setup}
+library(randomForest)
+library(MASS)
+library(caret)
+
+#setwd("E:/Google Drive/School/W2022/STAT 441/kaggle/stat441_w22_kaggle_project/murphy")
+
+train <- read.csv("../preprocessing/preprocesed_variables_train.csv")
+predict_set <- read.csv("../preprocessing/preprocesed_variables_test.csv")
+important_variables <- read.csv("../preprocessing/important.csv")
+
+y <- train['health']
+train <- train[, important_variables[,]]
+train <- cbind(train, y)
+train$health <- as.factor(train$health)
+
+#Dividing data into training and test set
+#Random sampling 
+samplesize = 0.80*nrow(train)
+set.seed(100)
+index = sample(seq_len(nrow(train)), size = samplesize)
+#Creating training and test set 
+datatrain = train[index,]
+datatest = train[-index,]
+
+Mode <- function(x, na.rm = T) {
+  if(na.rm){
+    x = x[!is.na(x)]
+  }
+
+  ux <- unique(x)
+  return(ux[which.max(tabulate(match(x, ux)))])
+}
+
+cross_entropy <- function (predict, obs_class) {
+  # predict is a matrix, obs_class vector of class {1..M}
+  N <- NROW(predict)
+  sum = 0
+  log(predict[])
+  for (i in 1:N) {
+    sum = sum + log(predict[i, obs_class[i]])
+  }
+  return(-(sum/N))
+}
+```
+
+```{r oversample}
+require(imbalance)
+#table(datatrain$health)
+#imbalanceRatio(datatrain, classAttr = "health")
+#X_resample <- oversample(datatrain, ratio = 0.8, method = "ADASYN", classAttr = "health")
+#table(X_resample$health)
+#datatrain <- X_resample
+```
+
+# attempt 2
+
+Variable selection based on top 50% most important variables
+
+```{r xgboost}
+require(dplyr)
+require(xgboost)
+library(Matrix)
+library(ggplot2)
+library(ggthemes)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(parallel)
+library(doParallel)
+# {'colsample_bytree': 0.7201663275432886, 'gamma': 0.4174981803004834, 'learning_rate': 0.0811519922347911, 'max_depth': 4, 'n_estimators': 112, 'subsample': 0.6466086108209839}
+temp.train <- mutate_all(datatrain, function(x) as.numeric(as.character(x)))
+dmatrix <- xgb.DMatrix(label = temp.train$health, data = as.matrix(temp.train[, -NCOL(temp.train)]))
+
+# Training Parameters
+CV_folds <- 5 # number of folds
+CV_repeats <- 3 # number of repeats
+minimum_resampling <- 5 # minimum number of resamples
+
+# trainControl object for repeated cross-validation with random search
+adapt_control_random <- caret::trainControl(
+  method = "adaptive_cv", 
+  number = CV_folds, 
+  repeats = CV_repeats, 
+  adaptive = list(min = minimum_resampling, # minimum number of resamples tested before model is excluded
+                  alpha = 0.05, # confidence level used to exclude parameter settings
+                  method = "gls", # generalized least squares
+                  complete = TRUE), 
+  search = "random", # execute random search
+  verboseIter = T, returnData = FALSE) 
+
+
+params <- expand.grid(
+               num_class = 5,
+               nthread = 4, 
+               objective = "multi:softprob",
+               booster='gbtree',
+               
+               colsample_bytree = 0.7201663275432886,
+               gamma = c(0.1, 0.5, 1),
+               eta = c(0.01, 1, 1),
+               lambda = c(0.1, 0.5, 1),
+               
+               max.depth = c(2, 4, 6), 
+               min_child_weight = 1,
+               subsample = 1)
+
+cluster <- makeCluster(detectCores() - 1) # number of cores, convention to leave 1 core for OS
+registerDoParallel(cluster) # register the parallel processing
+
+bst.cv <- xgb.cv(data = dmatrix, 
+              label = temp.train$health, 
+              params = params,
+              nrounds = 14, 
+              nfold = 5,
+              print_every_n = 20,
+              verbose = 2)
+```
+
+
+```{r}
+RS_T0 <- Sys.time()
+cluster <- makeCluster(detectCores() - 1) # number of cores, convention to leave 1 core for OS
+registerDoParallel(cluster) # register the parallel processing
+
+set.seed(1); 
+RS_XGB <- caret::train(
+  health ~ ., 
+  data = temp.train,
+  method = "xgbTree",
+  verbose = T, 
+  silent = 0,
+  tuneLength = 150
+)
+
+stopCluster(cluster) # shut down the cluster 
+registerDoSEQ(); #force R to return to single threaded processing
+RS_T1 <- Sys.time()
+RS_T1-RS_T0
+```
+
+```{r plot}
+res_df <- data.frame(TRAINING_LOGLOSS = bst.cv$evaluation_log$train_mlogloss_mean, 
+                     VALIDATION_LOGLOSS = bst.cv$evaluation_log$test_mlogloss_mean, # Don't confuse this with the test data set. 
+                     ITERATION = bst.cv$evaluation_log$iter) %>%
+  mutate(MIN = VALIDATION_LOGLOSS == min(VALIDATION_LOGLOSS))
+best_nrounds <- res_df %>%
+  filter(MIN) %>%
+  pull(ITERATION)
+res_df_longer <- pivot_longer(data = res_df, 
+                              cols = c(TRAINING_LOGLOSS, VALIDATION_LOGLOSS), 
+                              names_to = "ERROR_TYPE",
+                              values_to = "ERROR")
+g <- ggplot(res_df_longer, aes(x = ITERATION)) +        # Look @ it overfit.
+  geom_line(aes(y = ERROR, group = ERROR_TYPE, colour = ERROR_TYPE)) +
+  geom_vline(xintercept = best_nrounds, colour = "green") +
+  geom_label(aes(label = str_interp("${best_nrounds} iterations gives minimum entropy"), y = 0.2, x = best_nrounds, hjust = 0.1)) +
+  labs(
+    x = "nrounds",
+    y = "Error",
+    title = "Test & Train Errors",
+    subtitle = str_interp("Note how the training error keeps decreasing after ${best_nrounds} iterations, but the validation error starts \ncreeping up. This is a sign of overfitting.")
+  ) +
+  scale_colour_discrete("Error Type: ")
+g
+```
+
+```{r}
+bstSparse <- xgboost(data = dmatrix, nrounds = best_nrounds, params = params)
+
+temp.test <- mutate_all(datatest, function(x) as.numeric(as.character(x)))
+dmatrix.test <- xgb.DMatrix(label = temp.test$health, data = as.matrix(temp.test[, -NCOL(temp.test)]))
+xgbpred <- predict(xgb, dmatrix.test)
+
+xgbpred <- matrix(xgbpred, ncol = 5)
+colnames(xgbpred) <- 1:5
+
+cross_entropy(xgbpred, temp.test$health + 1)
+```
+
+
+
+
